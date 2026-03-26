@@ -1,14 +1,3 @@
-"""
-titanic_pipeline.pipeline
-~~~~~~~~~~~~~~~~~~~~~~~~~
-Contains the full Titanic ML pipeline code as named section strings,
-and the print_pipeline() entrypoint.
-"""
-
-_SECTIONS = {
-    "imports": {
-        "title": "IMPORTS",
-        "code": """\
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -25,12 +14,13 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 import warnings
-warnings.filterwarnings('ignore')""",
-    },
+warnings.filterwarnings('ignore')
 
-    "eda": {
-        "title": "SECTION 1 -- Data Loading & Exploration (EDA)",
-        "code": """\
+
+# =============================================================================
+#  SECTION 1 — Data Loading & Exploration (EDA)
+# =============================================================================
+
 df = sns.load_dataset('titanic')
 print('Shape:', df.shape)
 print(df.head())
@@ -45,7 +35,7 @@ print(missing_df[missing_df['count'] > 0])
 
 print('Survived value counts:')
 print(df['survived'].value_counts())
-print('\\nClass balance (%):')
+print('\nClass balance (%):')
 print(df['survived'].value_counts(normalize=True) * 100)
 
 # fig, axes = plt.subplots(1, 3, figsize=(15, 4))
@@ -64,12 +54,13 @@ print(df['survived'].value_counts(normalize=True) * 100)
 # plt.figure(figsize=(8, 6))
 # sns.heatmap(df[numeric_cols].corr(), annot=True, fmt='.2f', cmap='coolwarm')
 # plt.title('Correlation Heatmap')
-# plt.show()""",
-    },
+# plt.show()
 
-    "preprocessing": {
-        "title": "SECTION 2 -- Preprocessing & Feature Engineering",
-        "code": """\
+
+# =============================================================================
+#  SECTION 2 — Preprocessing & Feature Engineering
+# =============================================================================
+
 data = df.copy()
 
 # Drop redundant/duplicate columns
@@ -110,16 +101,17 @@ X_train_fe, X_test_fe, y_train_fe, y_test_fe = train_test_split(
 print(f'Train: {X_train_fe.shape}  |  Test: {X_test_fe.shape}')
 print('Train class balance:', y_train_fe.value_counts(normalize=True).to_dict())
 
-# Scale -- required for k-NN, LR, SVM; fit only on train
+# Scale — required for k-NN, LR, SVM; fit only on train
 scaler_fe = StandardScaler()
 X_train_fe_scaled = scaler_fe.fit_transform(X_train_fe)
 X_test_fe_scaled  = scaler_fe.transform(X_test_fe)
-print('Feature set:', list(X_fe.columns))""",
-    },
+print('Feature set:', list(X_fe.columns))
 
-    "model_selection": {
-        "title": "SECTION 4 -- Model Selection & Training",
-        "code": """\
+
+# =============================================================================
+#  SECTION 4 — Model Selection & Training
+# =============================================================================
+
 models = {
     'Logistic Regression': LogisticRegression(max_iter=1000),
     'Decision Tree':       DecisionTreeClassifier(random_state=42),
@@ -163,7 +155,7 @@ summary = pd.DataFrame({
         'Recall':    f"{r['recall']:.3f}",
         'F1':        f"{r['f1']:.3f}",
         'ROC-AUC':   f"{r['roc_auc']:.3f}",
-        'CV Mean':   f"{r['cv_mean']:.3f} +/- {r['cv_std']:.3f}",
+        'CV Mean':   f"{r['cv_mean']:.3f} ± {r['cv_std']:.3f}",
     }
     for name, r in results.items()
 }).T
@@ -205,12 +197,13 @@ for k in k_range:
 # plt.show()
 
 best_k = k_range[k_scores.index(max(k_scores))]
-print(f'Best k: {best_k}  |  CV Accuracy: {max(k_scores):.3f}')""",
-    },
+print(f'Best k: {best_k}  |  CV Accuracy: {max(k_scores):.3f}')
 
-    "evaluation": {
-        "title": "SECTION 5 -- Evaluation Metrics",
-        "code": """\
+
+# =============================================================================
+#  SECTION 5 — Evaluation Metrics
+# =============================================================================
+
 best_name = max(results, key=lambda k: results[k]['f1'])
 best_res  = results[best_name]
 print(f'Best model: {best_name}')
@@ -221,7 +214,7 @@ cm = confusion_matrix(y_test_fe, best_res['y_pred'])
 #             xticklabels=['Died', 'Survived'], yticklabels=['Died', 'Survived'])
 # plt.xlabel('Predicted')
 # plt.ylabel('Actual')
-# plt.title(f'Confusion Matrix -- {best_name}')
+# plt.title(f'Confusion Matrix — {best_name}')
 # plt.show()
 
 tn, fp, fn, tp = cm.ravel()
@@ -245,14 +238,15 @@ print(classification_report(y_test_fe, best_res['y_pred'], target_names=['Died',
 # rf_model    = models['Random Forest']
 # importances = pd.Series(rf_model.feature_importances_, index=X_train_fe.columns)
 # importances.sort_values(ascending=True).plot(kind='barh', figsize=(8, 6))
-# plt.title('Feature Importances -- Random Forest')
+# plt.title('Feature Importances — Random Forest')
 # plt.tight_layout()
-# plt.show()""",
-    },
+# plt.show()
 
-    "tuning": {
-        "title": "SECTION 6 -- Hyperparameter Tuning (GridSearchCV)",
-        "code": """\
+
+# =============================================================================
+#  SECTION 6 — Hyperparameter Tuning (GridSearchCV)
+# =============================================================================
+
 # --- Decision Tree ---
 param_grid_dt = {
     'max_depth':         [3, 5, 7, None],
@@ -315,87 +309,34 @@ print('Best CV F1:     ', round(grid_svm.best_score_, 3))
 
 # --- Evaluate all tuned models ---
 tuned_models = {
-    'Tuned Decision Tree':       (grid_dt.best_estimator_,  X_test_fe),
-    'Tuned k-NN':                (grid_knn.best_estimator_, X_test_fe_scaled),
-    'Tuned Logistic Regression': (grid_lr.best_estimator_,  X_test_fe_scaled),
-    'Tuned Random Forest':       (grid_rf.best_estimator_,  X_test_fe),
-    'Tuned SVM':                 (grid_svm.best_estimator_, X_test_fe_scaled),
+    'Tuned Decision Tree':      (grid_dt.best_estimator_,  X_test_fe),
+    'Tuned k-NN':               (grid_knn.best_estimator_, X_test_fe_scaled),
+    'Tuned Logistic Regression':(grid_lr.best_estimator_,  X_test_fe_scaled),
+    'Tuned Random Forest':      (grid_rf.best_estimator_,  X_test_fe),
+    'Tuned SVM':                (grid_svm.best_estimator_, X_test_fe_scaled),
 }
 tuned_results = {}
 for name, (model, X_test_input) in tuned_models.items():
     y_pred = model.predict(X_test_input)
-    print(f'\\n{name}')
+    print(f'\n{name}')
     print(f'  Accuracy : {accuracy_score(y_test_fe, y_pred):.3f}')
     print(f'  F1 Score : {f1_score(y_test_fe, y_pred):.3f}')
     print(f'  ROC-AUC  : {roc_auc_score(y_test_fe, model.predict_proba(X_test_input)[:, 1]):.3f}')
-    tuned_results[name] = {'f1': f1_score(y_test_fe, y_pred), 'y_pred': y_pred}""",
-    },
+    tuned_results[name] = {'f1': f1_score(y_test_fe, y_pred), 'y_pred': y_pred}
 
-    "final": {
-        "title": "FINAL -- Select Best Model & Save Predictions",
-        "code": """\
+
+# =============================================================================
+#  FINAL — Select Best Model & Save Predictions
+# =============================================================================
+
 best_tuned_name = max(tuned_results, key=lambda k: tuned_results[k]['f1'])
 best_tuned_pred = tuned_results[best_tuned_name]['y_pred']
 
-print(f'\\nSelected model: {best_tuned_name}  (F1 = {tuned_results[best_tuned_name]["f1"]:.3f})')
+print(f'\nSelected model: {best_tuned_name}  (F1 = {tuned_results[best_tuned_name]["f1"]:.3f})')
 
 output = pd.DataFrame({
     'actual':    y_test_fe.values,
     'predicted': best_tuned_pred,
 })
 output.to_csv('predictions.csv', index=False)
-print('Predictions saved to predictions.csv')""",
-    },
-}
-
-_SECTION_ORDER = [
-    "imports",
-    "eda",
-    "preprocessing",
-    "model_selection",
-    "evaluation",
-    "tuning",
-    "final",
-]
-
-
-def print_pipeline(section: str = None) -> None:
-    """Print the full Titanic ML pipeline code, or a single named section.
-
-    Parameters
-    ----------
-    section : str, optional
-        One of: 'imports', 'eda', 'preprocessing',
-        'model_selection', 'evaluation', 'tuning', 'final'.
-        If omitted, every section is printed in order.
-
-    Examples
-    --------
-    >>> from titanic_pipeline import print_pipeline
-    >>> print_pipeline()                   # prints everything
-    >>> print_pipeline('preprocessing')    # prints Section 2 (preprocessing + feature engineering)
-    >>> print_pipeline('tuning')           # prints Section 5 (hyperparameter tuning)
-    >>> print_pipeline('final')            # prints model selection & CSV export
-    """
-    if section is not None:
-        section = section.lower().strip()
-        if section not in _SECTIONS:
-            valid = ", ".join(f"'{k}'" for k in _SECTION_ORDER)
-            raise ValueError(
-                f"Unknown section '{section}'. Valid options: {valid}"
-            )
-        _print_section(section)
-        return
-
-    for key in _SECTION_ORDER:
-        _print_section(key)
-        print()
-
-
-def _print_section(key: str) -> None:
-    sec = _SECTIONS[key]
-    border = "#" + "=" * 72
-    print(border)
-    print(f" # {sec['title']}")
-    print(border)
-    print(sec["code"])
+print('Predictions saved to predictions.csv')
