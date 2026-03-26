@@ -423,8 +423,8 @@ def print_pipeline(section: str = None) -> None:
 
 def _print_section(key: str) -> None:
     sec = _SECTIONS[key]
-    border = "=" * 72
+    border = "#" + "=" * 72
     print(border)
-    print(f"  {sec['title']}")
+    print(f" # {sec['title']}")
     print(border)
     print(sec["code"])
