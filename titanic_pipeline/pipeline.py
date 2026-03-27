@@ -399,3 +399,157 @@ def _print_section(key: str) -> None:
     print(f" # {sec['title']}")
     print(border)
     print(sec["code"])
+
+
+# =============================================================================
+#  Separate dataset variant (train.csv + test.csv)
+# =============================================================================
+
+_SECTIONS_SEP = {
+    "imports": _SECTIONS["imports"],
+
+    "eda": {
+        "title": "SECTION 1 -- Data Loading & Exploration (EDA)",
+        "code": """\
+train = pd.read_csv('train.csv')
+test  = pd.read_csv('test.csv')
+df = train  # EDA runs on train only
+
+print('Train shape:', train.shape)
+print('Test shape: ', test.shape)
+print(df.head())
+
+df.info()
+print(df.describe())
+
+missing = df.isnull().sum()
+missing_pct = (missing / len(df)) * 100
+missing_df = pd.DataFrame({'count': missing, 'pct': missing_pct})
+print(missing_df[missing_df['count'] > 0])
+
+print('Survived value counts:')
+print(df['survived'].value_counts())
+print('\\nClass balance (%):')
+print(df['survived'].value_counts(normalize=True) * 100)""",
+    },
+
+    "preprocessing": {
+        "title": "SECTION 2 -- Preprocessing & Feature Engineering",
+        "code": """\
+def preprocess(df):
+    df = df.copy()
+    cols_to_drop = ['alive', 'embark_town', 'who', 'adult_male', 'alone', 'deck', 'class']
+    df.drop(columns=[c for c in cols_to_drop if c in df.columns], inplace=True)
+    df['age']      = df['age'].fillna(df['age'].median())
+    df['embarked'] = df['embarked'].fillna(df['embarked'].mode()[0])
+    df['family_size']    = df['sibsp'] + df['parch'] + 1
+    df['is_alone']       = (df['family_size'] == 1).astype(int)
+    df['age_bin']        = pd.cut(df['age'], bins=[0, 12, 60, 100],
+                                  labels=['child', 'adult', 'senior'])
+    df['fare_per_person'] = df['fare'] / df['family_size']
+    df['sex'] = LabelEncoder().fit_transform(df['sex'])
+    df = pd.get_dummies(df, columns=['embarked', 'age_bin'], drop_first=True)
+    return df
+
+train_data = preprocess(train)
+test_data  = preprocess(test)
+
+# Align columns — test may be missing some dummy columns
+train_data, test_data = train_data.align(test_data, join='left', axis=1, fill_value=0)
+
+X_train_fe = train_data.drop('survived', axis=1).fillna(train_data.median(numeric_only=True))
+y_train_fe = train_data['survived']
+X_test_fe  = test_data.drop('survived', axis=1, errors='ignore').fillna(X_train_fe.median())
+
+# Scale -- fit only on train
+scaler_fe = StandardScaler()
+X_train_fe_scaled = scaler_fe.fit_transform(X_train_fe)
+X_test_fe_scaled  = scaler_fe.transform(X_test_fe)
+print('Feature set:', list(X_train_fe.columns))""",
+    },
+
+    "model_selection": _SECTIONS["model_selection"],
+
+    "evaluation": {
+        "title": "SECTION 4 -- Evaluation (CV on train only — test has no labels)",
+        "code": """\
+# test.csv has no 'survived' column so we cannot compute test metrics directly.
+# Cross-validation on the training set is the performance estimate.
+
+cv_results = {}
+for name, model in models.items():
+    if name in ['Decision Tree', 'Random Forest']:
+        scores = cross_val_score(model, X_train_fe, y_train_fe, cv=5, scoring='f1')
+    else:
+        scores = cross_val_score(model, X_train_fe_scaled, y_train_fe, cv=5, scoring='f1')
+    cv_results[name] = scores
+    print(f'{name}: CV F1 = {scores.mean():.3f} +/- {scores.std():.3f}')""",
+    },
+
+    "tuning": _SECTIONS["tuning"],
+
+    "final": {
+        "title": "FINAL -- Select Best Model & Save Predictions",
+        "code": """\
+best_tuned_name = max(tuned_results, key=lambda k: tuned_results[k]['f1'])
+best_tuned_pred = tuned_results[best_tuned_name]['y_pred']
+
+print(f'\\nSelected model: {best_tuned_name}  (CV F1 = {tuned_results[best_tuned_name]["f1"]:.3f})')
+
+# No 'actual' column -- test.csv has no labels
+output = pd.DataFrame({'predicted': best_tuned_pred})
+output.to_csv('predictions.csv', index=False)
+print('Predictions saved to predictions.csv')""",
+    },
+}
+
+_SECTION_ORDER_SEP = [
+    "imports",
+    "eda",
+    "preprocessing",
+    "model_selection",
+    "evaluation",
+    "tuning",
+    "final",
+]
+
+
+def print_pipeline_separate_dataset(section: str = None) -> None:
+    """Print the Titanic ML pipeline adapted for separate train.csv and test.csv files.
+
+    Parameters
+    ----------
+    section : str, optional
+        One of: 'imports', 'eda', 'preprocessing',
+        'model_selection', 'evaluation', 'tuning', 'final'.
+        If omitted, every section is printed in order.
+
+    Examples
+    --------
+    >>> from titanic_pipeline import print_pipeline_separate_dataset
+    >>> print_pipeline_separate_dataset()               # prints everything
+    >>> print_pipeline_separate_dataset('preprocessing')  # prints Section 2 only
+    >>> print_pipeline_separate_dataset('final')          # prints prediction export
+    """
+    if section is not None:
+        section = section.lower().strip()
+        if section not in _SECTIONS_SEP:
+            valid = ", ".join(f"'{k}'" for k in _SECTION_ORDER_SEP)
+            raise ValueError(
+                f"Unknown section '{section}'. Valid options: {valid}"
+            )
+        _print_section_sep(section)
+        return
+
+    for key in _SECTION_ORDER_SEP:
+        _print_section_sep(key)
+        print()
+
+
+def _print_section_sep(key: str) -> None:
+    sec = _SECTIONS_SEP[key]
+    border = "#" + "=" * 72
+    print(border)
+    print(f" # {sec['title']}")
+    print(border)
+    print(sec["code"])
