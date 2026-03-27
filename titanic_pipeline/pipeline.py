@@ -411,8 +411,8 @@ _SECTIONS_SEP = {
     "eda": {
         "title": "SECTION 1 -- Data Loading & Exploration (EDA)",
         "code": """\
-train = pd.read_csv('train.csv')
-test  = pd.read_csv('test.csv')
+train = pd.read_csv('datasets/titanic/train.csv')
+test  = pd.read_csv('datasets/titanic/test.csv')
 df = train  # EDA runs on train only
 
 print('Train shape:', train.shape)
@@ -428,9 +428,9 @@ missing_df = pd.DataFrame({'count': missing, 'pct': missing_pct})
 print(missing_df[missing_df['count'] > 0])
 
 print('Survived value counts:')
-print(df['survived'].value_counts())
-print('\\nClass balance (%):')
-print(df['survived'].value_counts(normalize=True) * 100)""",
+print(df['Survived'].value_counts())
+print('Survived balance (%):')
+print(df['Survived'].value_counts(normalize=True) * 100)""",
     },
 
     "preprocessing": {
@@ -438,17 +438,17 @@ print(df['survived'].value_counts(normalize=True) * 100)""",
         "code": """\
 def preprocess(df):
     df = df.copy()
-    cols_to_drop = ['alive', 'embark_town', 'who', 'adult_male', 'alone', 'deck', 'class']
+    cols_to_drop = ['PassengerId', 'Ticket', 'Cabin', 'Name']
     df.drop(columns=[c for c in cols_to_drop if c in df.columns], inplace=True)
-    df['age']      = df['age'].fillna(df['age'].median())
-    df['embarked'] = df['embarked'].fillna(df['embarked'].mode()[0])
-    df['family_size']    = df['sibsp'] + df['parch'] + 1
+    df['Age']      = df['Age'].fillna(df['Age'].median())
+    df['Embarked'] = df['Embarked'].fillna(df['Embarked'].mode()[0])
+    df['family_size']    = df['SibSp'] + df['Parch'] + 1
     df['is_alone']       = (df['family_size'] == 1).astype(int)
-    df['age_bin']        = pd.cut(df['age'], bins=[0, 12, 60, 100],
+    df['age_bin']        = pd.cut(df['Age'], bins=[0, 12, 60, 100],
                                   labels=['child', 'adult', 'senior'])
-    df['fare_per_person'] = df['fare'] / df['family_size']
-    df['sex'] = LabelEncoder().fit_transform(df['sex'])
-    df = pd.get_dummies(df, columns=['embarked', 'age_bin'], drop_first=True)
+    df['fare_per_person'] = df['Fare'] / df['family_size']
+    df['Sex'] = LabelEncoder().fit_transform(df['Sex'])
+    df = pd.get_dummies(df, columns=['Embarked', 'age_bin'], drop_first=True)
     return df
 
 train_data = preprocess(train)
@@ -457,9 +457,10 @@ test_data  = preprocess(test)
 # Align columns — test may be missing some dummy columns
 train_data, test_data = train_data.align(test_data, join='left', axis=1, fill_value=0)
 
-X_train_fe = train_data.drop('survived', axis=1).fillna(train_data.median(numeric_only=True))
-y_train_fe = train_data['survived']
-X_test_fe  = test_data.drop('survived', axis=1, errors='ignore').fillna(X_train_fe.median())
+X_fe = train_data.drop('Survived', axis=1).fillna(train_data.median(numeric_only=True))
+y_fe = train_data['Survived']
+print(X_fe.dtypes)
+X_train_fe, X_test_fe, y_train_fe, y_test_fe = train_test_split(X_fe, y_fe, test_size=0.2, random_state=42)
 
 # Scale -- fit only on train
 scaler_fe = StandardScaler()
@@ -473,7 +474,7 @@ print('Feature set:', list(X_train_fe.columns))""",
     "evaluation": {
         "title": "SECTION 4 -- Evaluation (CV on train only — test has no labels)",
         "code": """\
-# test.csv has no 'survived' column so we cannot compute test metrics directly.
+# test.csv has no 'Survived' column so we cannot compute test metrics directly.
 # Cross-validation on the training set is the performance estimate.
 
 cv_results = {}
@@ -492,12 +493,20 @@ for name, model in models.items():
         "title": "FINAL -- Select Best Model & Save Predictions",
         "code": """\
 best_tuned_name = max(tuned_results, key=lambda k: tuned_results[k]['f1'])
-best_tuned_pred = tuned_results[best_tuned_name]['y_pred']
 
 print(f'\\nSelected model: {best_tuned_name}  (CV F1 = {tuned_results[best_tuned_name]["f1"]:.3f})')
 
-# No 'actual' column -- test.csv has no labels
-output = pd.DataFrame({'predicted': best_tuned_pred})
+# Predict on actual test.csv using the best tuned model
+X_final = test_data.drop('Survived', axis=1, errors='ignore').fillna(X_train_fe.median())
+X_final_scaled = scaler_fe.transform(X_final)
+
+best_model, _ = tuned_models[best_tuned_name]
+if best_tuned_name in ['Tuned Decision Tree', 'Tuned Random Forest']:
+    final_pred = best_model.predict(X_final)
+else:
+    final_pred = best_model.predict(X_final_scaled)
+
+output = pd.DataFrame({'predicted': final_pred})
 output.to_csv('predictions.csv', index=False)
 print('Predictions saved to predictions.csv')""",
     },
