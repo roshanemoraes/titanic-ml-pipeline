@@ -576,3 +576,306 @@ def _print_section_sep(key: str) -> None:
     print(f" # {sec['title']}")
     print(border)
     print(sec["code"])
+
+
+# =============================================================================
+#  Multiclass variant (train.csv + test.csv, 3+ target classes)
+# =============================================================================
+
+_SECTIONS_MULTI = {
+    "imports": _SECTIONS["imports"],
+
+    "eda": _SECTIONS_SEP["eda"],
+
+    "preprocessing": {
+        "title": "SECTION 2 -- Preprocessing & Feature Engineering",
+        "code": """\
+def preprocess(df):
+    df = df.copy()
+    cols_to_drop = ['PassengerId', 'Ticket', 'Cabin', 'Name']
+    df.drop(columns=[c for c in cols_to_drop if c in df.columns], inplace=True)
+    df['Age']      = df['Age'].fillna(df['Age'].median())
+    df['Embarked'] = df['Embarked'].fillna(df['Embarked'].mode()[0])
+    df['family_size']    = df['SibSp'] + df['Parch'] + 1
+    df['is_alone']       = (df['family_size'] == 1).astype(int)
+    df['age_bin']        = pd.cut(df['Age'], bins=[0, 12, 60, 100],
+                                  labels=['child', 'adult', 'senior'])
+    df['fare_per_person'] = df['Fare'] / df['family_size']
+    df['Sex'] = LabelEncoder().fit_transform(df['Sex'])
+    df = pd.get_dummies(df, columns=['Embarked', 'age_bin'], drop_first=True)
+    return df
+
+train_data = preprocess(train)
+test_data  = preprocess(test)
+
+# Align columns — test may be missing some dummy columns
+train_data, test_data = train_data.align(test_data, join='left', axis=1, fill_value=0)
+
+X_fe = train_data.drop('target', axis=1).fillna(train_data.median(numeric_only=True))
+
+# Encode target if it contains string class labels
+le_target = LabelEncoder()
+y_fe = le_target.fit_transform(train_data['target'])
+print('Classes:', list(le_target.classes_))
+
+print(X_fe.dtypes)
+X_train_fe, X_test_fe, y_train_fe, y_test_fe = train_test_split(X_fe, y_fe, test_size=0.2, random_state=42)
+
+# Scale -- fit only on train
+scaler_fe = StandardScaler()
+X_train_fe_scaled = scaler_fe.fit_transform(X_train_fe)
+X_test_fe_scaled  = scaler_fe.transform(X_test_fe)
+print('Feature set:', list(X_train_fe.columns))""",
+    },
+
+    "model_selection": {
+        "title": "SECTION 3 -- Model Selection & Training",
+        "code": """\
+models = {
+    'Logistic Regression': LogisticRegression(max_iter=1000),
+    'Decision Tree':       DecisionTreeClassifier(random_state=42),
+    'k-NN (k=5)':         KNeighborsClassifier(n_neighbors=5),
+    'Random Forest':       RandomForestClassifier(n_estimators=100, random_state=42),
+    'SVM':                 SVC(probability=True),
+}
+
+results = {}
+
+for name, model in models.items():
+    if name in ['Decision Tree', 'Random Forest']:
+        model.fit(X_train_fe, y_train_fe)
+        y_pred = model.predict(X_test_fe)
+        y_prob = model.predict_proba(X_test_fe)          # all class columns
+        cv_scores = cross_val_score(model, X_fe, y_fe, cv=5, scoring='accuracy')
+    else:
+        model.fit(X_train_fe_scaled, y_train_fe)
+        y_pred = model.predict(X_test_fe_scaled)
+        y_prob = model.predict_proba(X_test_fe_scaled)   # all class columns
+        cv_scores = cross_val_score(model, X_train_fe_scaled, y_train_fe, cv=5, scoring='accuracy')
+
+    results[name] = {
+        'accuracy':  accuracy_score(y_test_fe, y_pred),
+        'precision': precision_score(y_test_fe, y_pred, average='weighted'),
+        'recall':    recall_score(y_test_fe, y_pred, average='weighted'),
+        'f1':        f1_score(y_test_fe, y_pred, average='weighted'),
+        'roc_auc':   roc_auc_score(y_test_fe, y_prob, multi_class='ovr', average='macro'),
+        'cv_mean':   cv_scores.mean(),
+        'cv_std':    cv_scores.std(),
+        'y_pred':    y_pred,
+        'y_prob':    y_prob,
+    }
+
+print('Training complete.')
+
+summary = pd.DataFrame({
+    name: {
+        'Accuracy':  f"{r['accuracy']:.3f}",
+        'Precision': f"{r['precision']:.3f}",
+        'Recall':    f"{r['recall']:.3f}",
+        'F1':        f"{r['f1']:.3f}",
+        'ROC-AUC':   f"{r['roc_auc']:.3f}",
+        'CV Mean':   f"{r['cv_mean']:.3f} +/- {r['cv_std']:.3f}",
+    }
+    for name, r in results.items()
+}).T
+print(summary)
+
+k_range  = range(1, 21)
+k_scores = []
+for k in k_range:
+    knn   = KNeighborsClassifier(n_neighbors=k)
+    score = cross_val_score(knn, X_train_fe_scaled, y_train_fe, cv=5, scoring='accuracy').mean()
+    k_scores.append(score)
+
+best_k = k_range[k_scores.index(max(k_scores))]
+print(f'Best k: {best_k}  |  CV Accuracy: {max(k_scores):.3f}')""",
+    },
+
+    "evaluation": {
+        "title": "SECTION 4 -- Evaluation Metrics",
+        "code": """\
+best_name = max(results, key=lambda k: results[k]['f1'])
+best_res  = results[best_name]
+print(f'Best model: {best_name}')
+
+cm = confusion_matrix(y_test_fe, best_res['y_pred'])
+print('Confusion Matrix:')
+print(cm)
+
+# cm.ravel() is binary-only — for multiclass use the full matrix above
+print(classification_report(y_test_fe, best_res['y_pred'],
+                             target_names=list(le_target.classes_)))""",
+    },
+
+    "tuning": {
+        "title": "SECTION 5 -- Hyperparameter Tuning (GridSearchCV)",
+        "code": """\
+# --- Decision Tree ---
+param_grid_dt = {
+    'max_depth':         [3, 5, 7, None],
+    'min_samples_split': [2, 5, 10],
+    'criterion':         ['gini', 'entropy'],
+}
+grid_dt = GridSearchCV(DecisionTreeClassifier(random_state=42),
+                       param_grid_dt, cv=5, scoring='f1_weighted', n_jobs=-1)
+grid_dt.fit(X_train_fe, y_train_fe)
+print('Best DT params:', grid_dt.best_params_)
+print('Best CV F1:    ', round(grid_dt.best_score_, 3))
+
+# --- k-NN ---
+param_grid_knn = {
+    'n_neighbors': list(range(1, 21)),
+    'weights':     ['uniform', 'distance'],
+    'metric':      ['euclidean', 'manhattan'],
+}
+grid_knn = GridSearchCV(KNeighborsClassifier(),
+                        param_grid_knn, cv=5, scoring='f1_weighted', n_jobs=-1)
+grid_knn.fit(X_train_fe_scaled, y_train_fe)
+print('Best k-NN params:', grid_knn.best_params_)
+print('Best CV F1:       ', round(grid_knn.best_score_, 3))
+
+# --- Logistic Regression ---
+param_grid_lr = {
+    'C':       [0.01, 0.1, 1, 10, 100],
+    'penalty': ['l1', 'l2'],
+    'solver':  ['liblinear'],
+}
+grid_lr = GridSearchCV(LogisticRegression(max_iter=1000),
+                       param_grid_lr, cv=5, scoring='f1_weighted', n_jobs=-1)
+grid_lr.fit(X_train_fe_scaled, y_train_fe)
+print('Best LR params:', grid_lr.best_params_)
+print('Best CV F1:    ', round(grid_lr.best_score_, 3))
+
+# --- Random Forest ---
+param_grid_rf = {
+    'n_estimators': [50, 100, 200],
+    'max_depth':    [3, 5, 7, None],
+    'max_features': ['sqrt', 'log2'],
+}
+grid_rf = GridSearchCV(RandomForestClassifier(random_state=42),
+                       param_grid_rf, cv=5, scoring='f1_weighted', n_jobs=-1)
+grid_rf.fit(X_train_fe, y_train_fe)
+print('Best RF params:', grid_rf.best_params_)
+print('Best CV F1:    ', round(grid_rf.best_score_, 3))
+
+# --- SVM ---
+param_grid_svm = {
+    'C':      [0.1, 1, 10],
+    'kernel': ['rbf', 'linear'],
+    'gamma':  ['scale', 'auto'],
+}
+grid_svm = GridSearchCV(SVC(probability=True),
+                        param_grid_svm, cv=5, scoring='f1_weighted', n_jobs=-1)
+grid_svm.fit(X_train_fe_scaled, y_train_fe)
+print('Best SVM params:', grid_svm.best_params_)
+print('Best CV F1:     ', round(grid_svm.best_score_, 3))
+
+# --- Evaluate all tuned models ---
+tuned_models = {
+    'Tuned Decision Tree':       (grid_dt.best_estimator_,  X_test_fe),
+    'Tuned k-NN':                (grid_knn.best_estimator_, X_test_fe_scaled),
+    'Tuned Logistic Regression': (grid_lr.best_estimator_,  X_test_fe_scaled),
+    'Tuned Random Forest':       (grid_rf.best_estimator_,  X_test_fe),
+    'Tuned SVM':                 (grid_svm.best_estimator_, X_test_fe_scaled),
+}
+tuned_results = {}
+for name, (model, X_test_input) in tuned_models.items():
+    y_pred = model.predict(X_test_input)
+    y_prob = model.predict_proba(X_test_input)
+    print(f'\\n{name}')
+    print(f'  Accuracy : {accuracy_score(y_test_fe, y_pred):.3f}')
+    print(f'  F1 Score : {f1_score(y_test_fe, y_pred, average="weighted"):.3f}')
+    print(f'  ROC-AUC  : {roc_auc_score(y_test_fe, y_prob, multi_class="ovr", average="macro"):.3f}')
+    tuned_results[name] = {'f1': f1_score(y_test_fe, y_pred, average='weighted'), 'y_pred': y_pred}""",
+    },
+
+    "final": {
+        "title": "FINAL -- Select Best Model & Save Predictions",
+        "code": """\
+best_tuned_name = max(tuned_results, key=lambda k: tuned_results[k]['f1'])
+best_model, _ = tuned_models[best_tuned_name]
+
+print(f'\\nSelected model: {best_tuned_name}  (F1 = {tuned_results[best_tuned_name]["f1"]:.3f})')
+
+# Retrain the best model on the FULL train.csv (not just the 80% split)
+X_full = X_fe
+y_full = y_fe
+
+if best_tuned_name in ['Tuned Decision Tree', 'Tuned Random Forest']:
+    best_model.fit(X_full, y_full)
+else:
+    scaler_full = StandardScaler()
+    X_full_scaled = scaler_full.fit_transform(X_full)
+    best_model.fit(X_full_scaled, y_full)
+
+# Prepare test.csv features
+X_final = test_data.drop('target', axis=1, errors='ignore').fillna(X_full.median())
+
+if best_tuned_name in ['Tuned Decision Tree', 'Tuned Random Forest']:
+    final_pred_encoded = best_model.predict(X_final)
+else:
+    X_final_scaled = scaler_full.transform(X_final)
+    final_pred_encoded = best_model.predict(X_final_scaled)
+
+# Decode numeric predictions back to original class labels
+final_pred = le_target.inverse_transform(final_pred_encoded)
+
+# Add predictions column to original test.csv and save
+output = test.copy()
+output['Predicted'] = final_pred
+output.to_csv('predictions.csv', index=False)
+print('Predictions saved to predictions.csv')""",
+    },
+}
+
+_SECTION_ORDER_MULTI = [
+    "imports",
+    "eda",
+    "preprocessing",
+    "model_selection",
+    "evaluation",
+    "tuning",
+    "final",
+]
+
+
+def print_pipeline_multi_class(section: str = None) -> None:
+    """Print the Titanic ML pipeline adapted for multiclass classification.
+
+    Parameters
+    ----------
+    section : str, optional
+        One of: 'imports', 'eda', 'preprocessing',
+        'model_selection', 'evaluation', 'tuning', 'final'.
+        If omitted, every section is printed in order.
+
+    Examples
+    --------
+    >>> from titanic_pipeline import print_pipeline_multi_class
+    >>> print_pipeline_multi_class()                # prints everything
+    >>> print_pipeline_multi_class('preprocessing') # prints Section 2 only
+    >>> print_pipeline_multi_class('tuning')        # prints Section 5 only
+    >>> print_pipeline_multi_class('final')         # prints prediction export
+    """
+    if section is not None:
+        section = section.lower().strip()
+        if section not in _SECTIONS_MULTI:
+            valid = ", ".join(f"'{k}'" for k in _SECTION_ORDER_MULTI)
+            raise ValueError(
+                f"Unknown section '{section}'. Valid options: {valid}"
+            )
+        _print_section_multi(section)
+        return
+
+    for key in _SECTION_ORDER_MULTI:
+        _print_section_multi(key)
+        print()
+
+
+def _print_section_multi(key: str) -> None:
+    sec = _SECTIONS_MULTI[key]
+    border = "#" + "=" * 72
+    print(border)
+    print(f" # {sec['title']}")
+    print(border)
+    print(sec["code"])
