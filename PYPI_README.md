@@ -1,7 +1,6 @@
 # titanic-pipeline
 
-A classical ML pipeline for the Titanic survival dataset.
-Covers the full workflow: EDA, preprocessing, feature engineering, model selection, evaluation, and hyperparameter tuning — all accessible via a single `print_pipeline()` call.
+A classical machine learning pipeline built on the Titanic survival dataset. Covers the full ML workflow — EDA, preprocessing, feature engineering, model selection, evaluation, and hyperparameter tuning. Supports binary classification, multiclass classification, and regression, for both single-file and separate train/test datasets.
 
 ## Install
 
@@ -11,29 +10,81 @@ pip install titanic-pipeline
 
 ## Usage
 
+### Single dataset (binary classification)
+
 ```python
 from titanic_pipeline import print_pipeline
 
-# Print the entire pipeline
-print_pipeline()
-
-# Print a specific section
-print_pipeline('eda')
-print_pipeline('preprocessing')
-print_pipeline('feature_engineering')
-print_pipeline('model_selection')
-print_pipeline('evaluation')
-print_pipeline('tuning')
+print_pipeline()                    # print full pipeline
+print_pipeline('preprocessing')     # print a single section
 ```
 
-## Sections
+### Separate train / test datasets (binary classification)
 
-| Key | Contents |
+```python
+from titanic_pipeline import print_pipeline_separate_dataset
+
+print_pipeline_separate_dataset()
+print_pipeline_separate_dataset('tuning')
+```
+
+### Separate train / test datasets (multiclass classification)
+
+```python
+from titanic_pipeline import print_pipeline_multi_class
+
+print_pipeline_multi_class()
+print_pipeline_multi_class('tuning')
+```
+
+### Separate train / test datasets (regression)
+
+```python
+from titanic_pipeline import print_pipeline_regression
+
+print_pipeline_regression()
+print_pipeline_regression('tuning')
+```
+
+## Available Sections
+
+Pass any of these as the `section` argument to any function:
+
+| Key | Stage |
 |---|---|
-| `imports` | All library imports |
-| `eda` | Data loading, missing value audit, target distribution, visualizations |
-| `preprocessing` | Drop redundant columns, impute missing values, encode categoricals, scale, train/test split |
-| `feature_engineering` | `family_size`, `is_alone`, `age_bin`, `fare_per_person` with survival correlation plots |
-| `model_selection` | Logistic Regression, Decision Tree, k-NN, Random Forest, SVM — side-by-side comparison |
-| `evaluation` | Confusion matrix, classification report, ROC curves, feature importance |
-| `tuning` | GridSearchCV for Decision Tree and k-NN |
+| `'imports'` | All library imports |
+| `'eda'` | Data loading and exploration |
+| `'preprocessing'` | Imputation, feature engineering, encoding, scaling |
+| `'model_selection'` | Train and compare 5 models |
+| `'evaluation'` | Metrics suited to the task type |
+| `'tuning'` | GridSearchCV on all 5 models |
+| `'final'` | Select best model, retrain on full data, save predictions to CSV |
+
+## Function Comparison
+
+| Function | Task | Models | Key Metrics |
+|---|---|---|---|
+| `print_pipeline` | Binary classification | LR, DT, k-NN, RF, SVM | Accuracy, F1, ROC-AUC |
+| `print_pipeline_separate_dataset` | Binary classification | LR, DT, k-NN, RF, SVM | Accuracy, F1, ROC-AUC |
+| `print_pipeline_multi_class` | Multiclass classification | LR, DT, k-NN, RF, SVM | Weighted F1, ROC-AUC (OvR) |
+| `print_pipeline_regression` | Regression | Ridge, DT, k-NN, RF, SVR | MAE, RMSE, R² |
+
+## Pipeline Stages
+
+| # | Stage | What it covers |
+|---|-------|----------------|
+| 1 | **EDA** | Shape, dtypes, missing values, target distribution |
+| 2 | **Preprocessing & Feature Engineering** | Imputation, family size, age bins, fare-per-person, encoding, scaling |
+| 3 | **Model Selection & Training** | Train and compare 5 models side-by-side |
+| 4 | **Evaluation** | Metrics suited to task type |
+| 5 | **Hyperparameter Tuning** | GridSearchCV on all 5 models |
+| Final | **Best Model & Predictions** | Retrain on full data, predict on test set, save `predictions.csv` |
+
+## Requirements
+
+- Python >= 3.8
+- numpy, pandas, matplotlib, seaborn, scikit-learn
+
+## License
+
+MIT

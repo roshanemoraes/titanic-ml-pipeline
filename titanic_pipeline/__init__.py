@@ -11,4 +11,4 @@ __all__ = [
     "print_pipeline_multi_class",
     "print_pipeline_regression",
 ]
-__version__ = "0.1.12"
+__version__ = "0.1.13"
