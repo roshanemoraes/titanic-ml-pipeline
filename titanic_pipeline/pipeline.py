@@ -118,7 +118,7 @@ print('Feature set:', list(X_fe.columns))""",
     },
 
     "model_selection": {
-        "title": "SECTION 4 -- Model Selection & Training",
+        "title": "SECTION 3 -- Model Selection & Training",
         "code": """\
 models = {
     'Logistic Regression': LogisticRegression(max_iter=1000),
@@ -209,7 +209,7 @@ print(f'Best k: {best_k}  |  CV Accuracy: {max(k_scores):.3f}')""",
     },
 
     "evaluation": {
-        "title": "SECTION 5 -- Evaluation Metrics",
+        "title": "SECTION 4 -- Evaluation Metrics",
         "code": """\
 best_name = max(results, key=lambda k: results[k]['f1'])
 best_res  = results[best_name]
@@ -251,7 +251,7 @@ print(classification_report(y_test_fe, best_res['y_pred'], target_names=['Died',
     },
 
     "tuning": {
-        "title": "SECTION 6 -- Hyperparameter Tuning (GridSearchCV)",
+        "title": "SECTION 5 -- Hyperparameter Tuning (GridSearchCV)",
         "code": """\
 # --- Decision Tree ---
 param_grid_dt = {
@@ -493,20 +493,34 @@ for name, model in models.items():
         "title": "FINAL -- Select Best Model & Save Predictions",
         "code": """\
 best_tuned_name = max(tuned_results, key=lambda k: tuned_results[k]['f1'])
+best_model, _ = tuned_models[best_tuned_name]
 
 print(f'\\nSelected model: {best_tuned_name}  (CV F1 = {tuned_results[best_tuned_name]["f1"]:.3f})')
 
-# Predict on actual test.csv using the best tuned model
-X_final = test_data.drop('Survived', axis=1, errors='ignore').fillna(X_train_fe.median())
-X_final_scaled = scaler_fe.transform(X_final)
+# Retrain the best model on the FULL train.csv (not just the 80% split)
+# so all available labeled data is used for the final prediction
+X_full = X_fe
+y_full = y_fe
 
-best_model, _ = tuned_models[best_tuned_name]
+if best_tuned_name in ['Tuned Decision Tree', 'Tuned Random Forest']:
+    best_model.fit(X_full, y_full)
+else:
+    scaler_full = StandardScaler()
+    X_full_scaled = scaler_full.fit_transform(X_full)
+    best_model.fit(X_full_scaled, y_full)
+
+# Prepare test.csv features using the same preprocessing
+X_final = test_data.drop('Survived', axis=1, errors='ignore').fillna(X_full.median())
+
 if best_tuned_name in ['Tuned Decision Tree', 'Tuned Random Forest']:
     final_pred = best_model.predict(X_final)
 else:
+    X_final_scaled = scaler_full.transform(X_final)
     final_pred = best_model.predict(X_final_scaled)
 
-output = pd.DataFrame({'predicted': final_pred})
+# Add predictions column to original test.csv and save
+output = test.copy()
+output['Predicted'] = final_pred
 output.to_csv('predictions.csv', index=False)
 print('Predictions saved to predictions.csv')""",
     },
