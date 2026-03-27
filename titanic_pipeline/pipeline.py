@@ -879,3 +879,301 @@ def _print_section_multi(key: str) -> None:
     print(f" # {sec['title']}")
     print(border)
     print(sec["code"])
+
+
+# =============================================================================
+#  Regression variant (train.csv + test.csv, continuous target)
+# =============================================================================
+
+_SECTIONS_REG = {
+    "imports": {
+        "title": "IMPORTS",
+        "code": """\
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+import warnings
+warnings.filterwarnings('ignore')""",
+    },
+
+    "eda": _SECTIONS_SEP["eda"],
+
+    "preprocessing": {
+        "title": "SECTION 2 -- Preprocessing & Feature Engineering",
+        "code": """\
+def preprocess(df):
+    df = df.copy()
+    cols_to_drop = ['PassengerId', 'Ticket', 'Cabin', 'Name']
+    df.drop(columns=[c for c in cols_to_drop if c in df.columns], inplace=True)
+    df['Age']      = df['Age'].fillna(df['Age'].median())
+    df['Embarked'] = df['Embarked'].fillna(df['Embarked'].mode()[0])
+    df['family_size']    = df['SibSp'] + df['Parch'] + 1
+    df['is_alone']       = (df['family_size'] == 1).astype(int)
+    df['age_bin']        = pd.cut(df['Age'], bins=[0, 12, 60, 100],
+                                  labels=['child', 'adult', 'senior'])
+    df['fare_per_person'] = df['Fare'] / df['family_size']
+    df['Sex'] = LabelEncoder().fit_transform(df['Sex'])
+    df = pd.get_dummies(df, columns=['Embarked', 'age_bin'], drop_first=True)
+    return df
+
+train_data = preprocess(train)
+test_data  = preprocess(test)
+
+# Align columns — test may be missing some dummy columns
+train_data, test_data = train_data.align(test_data, join='left', axis=1, fill_value=0)
+
+X_fe = train_data.drop('target', axis=1).fillna(train_data.median(numeric_only=True))
+y_fe = train_data['target']   # continuous numeric target — no encoding needed
+
+print(X_fe.dtypes)
+# No stratify — stratify is for classification only
+X_train_fe, X_test_fe, y_train_fe, y_test_fe = train_test_split(X_fe, y_fe, test_size=0.2, random_state=42)
+
+# Scale -- fit only on train
+scaler_fe = StandardScaler()
+X_train_fe_scaled = scaler_fe.fit_transform(X_train_fe)
+X_test_fe_scaled  = scaler_fe.transform(X_test_fe)
+print('Feature set:', list(X_train_fe.columns))""",
+    },
+
+    "model_selection": {
+        "title": "SECTION 3 -- Model Selection & Training",
+        "code": """\
+models = {
+    'Ridge Regression': Ridge(),
+    'Decision Tree':    DecisionTreeRegressor(random_state=42),
+    'k-NN (k=5)':       KNeighborsRegressor(n_neighbors=5),
+    'Random Forest':    RandomForestRegressor(n_estimators=100, random_state=42),
+    'SVR':              SVR(),
+}
+
+results = {}
+
+for name, model in models.items():
+    if name in ['Decision Tree', 'Random Forest']:
+        model.fit(X_train_fe, y_train_fe)
+        y_pred    = model.predict(X_test_fe)
+        cv_scores = cross_val_score(model, X_fe, y_fe, cv=5, scoring='r2')
+    else:
+        model.fit(X_train_fe_scaled, y_train_fe)
+        y_pred    = model.predict(X_test_fe_scaled)
+        cv_scores = cross_val_score(model, X_train_fe_scaled, y_train_fe, cv=5, scoring='r2')
+
+    results[name] = {
+        'mae':     mean_absolute_error(y_test_fe, y_pred),
+        'rmse':    mean_squared_error(y_test_fe, y_pred) ** 0.5,
+        'r2':      r2_score(y_test_fe, y_pred),
+        'cv_mean': cv_scores.mean(),
+        'cv_std':  cv_scores.std(),
+        'y_pred':  y_pred,
+    }
+
+print('Training complete.')
+
+summary = pd.DataFrame({
+    name: {
+        'MAE':     f"{r['mae']:.3f}",
+        'RMSE':    f"{r['rmse']:.3f}",
+        'R²':      f"{r['r2']:.3f}",
+        'CV Mean': f"{r['cv_mean']:.3f} +/- {r['cv_std']:.3f}",
+    }
+    for name, r in results.items()
+}).T
+print(summary)
+
+k_range  = range(1, 21)
+k_scores = []
+for k in k_range:
+    knn   = KNeighborsRegressor(n_neighbors=k)
+    score = cross_val_score(knn, X_train_fe_scaled, y_train_fe, cv=5, scoring='r2').mean()
+    k_scores.append(score)
+
+best_k = k_range[k_scores.index(max(k_scores))]
+print(f'Best k: {best_k}  |  CV R²: {max(k_scores):.3f}')""",
+    },
+
+    "evaluation": {
+        "title": "SECTION 4 -- Evaluation Metrics",
+        "code": """\
+best_name = max(results, key=lambda k: results[k]['r2'])
+best_res  = results[best_name]
+print(f'Best model: {best_name}')
+print(f'MAE  : {best_res["mae"]:.3f}')
+print(f'RMSE : {best_res["rmse"]:.3f}')
+print(f'R²   : {best_res["r2"]:.3f}')""",
+    },
+
+    "tuning": {
+        "title": "SECTION 5 -- Hyperparameter Tuning (GridSearchCV)",
+        "code": """\
+# --- Decision Tree ---
+param_grid_dt = {
+    'max_depth':         [3, 5, 7, None],
+    'min_samples_split': [2, 5, 10],
+}
+grid_dt = GridSearchCV(DecisionTreeRegressor(random_state=42),
+                       param_grid_dt, cv=5, scoring='r2', n_jobs=-1)
+grid_dt.fit(X_train_fe, y_train_fe)
+print('Best DT params:', grid_dt.best_params_)
+print('Best CV R²:    ', round(grid_dt.best_score_, 3))
+
+# --- k-NN ---
+param_grid_knn = {
+    'n_neighbors': list(range(1, 21)),
+    'weights':     ['uniform', 'distance'],
+    'metric':      ['euclidean', 'manhattan'],
+}
+grid_knn = GridSearchCV(KNeighborsRegressor(),
+                        param_grid_knn, cv=5, scoring='r2', n_jobs=-1)
+grid_knn.fit(X_train_fe_scaled, y_train_fe)
+print('Best k-NN params:', grid_knn.best_params_)
+print('Best CV R²:       ', round(grid_knn.best_score_, 3))
+
+# --- Ridge Regression ---
+param_grid_ridge = {
+    'alpha': [0.01, 0.1, 1, 10, 100],
+}
+grid_ridge = GridSearchCV(Ridge(),
+                          param_grid_ridge, cv=5, scoring='r2', n_jobs=-1)
+grid_ridge.fit(X_train_fe_scaled, y_train_fe)
+print('Best Ridge params:', grid_ridge.best_params_)
+print('Best CV R²:       ', round(grid_ridge.best_score_, 3))
+
+# --- Random Forest ---
+param_grid_rf = {
+    'n_estimators': [50, 100, 200],
+    'max_depth':    [3, 5, 7, None],
+    'max_features': ['sqrt', 'log2'],
+}
+grid_rf = GridSearchCV(RandomForestRegressor(random_state=42),
+                       param_grid_rf, cv=5, scoring='r2', n_jobs=-1)
+grid_rf.fit(X_train_fe, y_train_fe)
+print('Best RF params:', grid_rf.best_params_)
+print('Best CV R²:    ', round(grid_rf.best_score_, 3))
+
+# --- SVR ---
+param_grid_svr = {
+    'C':       [0.1, 1, 10],
+    'kernel':  ['rbf', 'linear'],
+    'epsilon': [0.01, 0.1, 0.5],
+}
+grid_svr = GridSearchCV(SVR(),
+                        param_grid_svr, cv=5, scoring='r2', n_jobs=-1)
+grid_svr.fit(X_train_fe_scaled, y_train_fe)
+print('Best SVR params:', grid_svr.best_params_)
+print('Best CV R²:     ', round(grid_svr.best_score_, 3))
+
+# --- Evaluate all tuned models ---
+tuned_models = {
+    'Tuned Decision Tree':  (grid_dt.best_estimator_,    X_test_fe),
+    'Tuned k-NN':           (grid_knn.best_estimator_,   X_test_fe_scaled),
+    'Tuned Ridge':          (grid_ridge.best_estimator_, X_test_fe_scaled),
+    'Tuned Random Forest':  (grid_rf.best_estimator_,    X_test_fe),
+    'Tuned SVR':            (grid_svr.best_estimator_,   X_test_fe_scaled),
+}
+tuned_results = {}
+for name, (model, X_test_input) in tuned_models.items():
+    y_pred = model.predict(X_test_input)
+    print(f'\\n{name}')
+    print(f'  MAE  : {mean_absolute_error(y_test_fe, y_pred):.3f}')
+    print(f'  RMSE : {mean_squared_error(y_test_fe, y_pred) ** 0.5:.3f}')
+    print(f'  R²   : {r2_score(y_test_fe, y_pred):.3f}')
+    tuned_results[name] = {'r2': r2_score(y_test_fe, y_pred), 'y_pred': y_pred}""",
+    },
+
+    "final": {
+        "title": "FINAL -- Select Best Model & Save Predictions",
+        "code": """\
+best_tuned_name = max(tuned_results, key=lambda k: tuned_results[k]['r2'])
+best_model, _ = tuned_models[best_tuned_name]
+
+print(f'\\nSelected model: {best_tuned_name}  (R² = {tuned_results[best_tuned_name]["r2"]:.3f})')
+
+# Retrain the best model on the FULL train.csv (not just the 80% split)
+X_full = X_fe
+y_full = y_fe
+
+if best_tuned_name in ['Tuned Decision Tree', 'Tuned Random Forest']:
+    best_model.fit(X_full, y_full)
+else:
+    scaler_full = StandardScaler()
+    X_full_scaled = scaler_full.fit_transform(X_full)
+    best_model.fit(X_full_scaled, y_full)
+
+# Prepare test.csv features
+X_final = test_data.drop('target', axis=1, errors='ignore').fillna(X_full.median())
+
+if best_tuned_name in ['Tuned Decision Tree', 'Tuned Random Forest']:
+    final_pred = best_model.predict(X_final)
+else:
+    X_final_scaled = scaler_full.transform(X_final)
+    final_pred = best_model.predict(X_final_scaled)
+
+# Add predictions column to original test.csv and save
+output = test.copy()
+output['PredictedValue'] = final_pred
+output.to_csv('predictions.csv', index=False)
+print('Predictions saved to predictions.csv')""",
+    },
+}
+
+_SECTION_ORDER_REG = [
+    "imports",
+    "eda",
+    "preprocessing",
+    "model_selection",
+    "evaluation",
+    "tuning",
+    "final",
+]
+
+
+def print_pipeline_regression(section: str = None) -> None:
+    """Print the ML pipeline adapted for regression (continuous target).
+
+    Parameters
+    ----------
+    section : str, optional
+        One of: 'imports', 'eda', 'preprocessing',
+        'model_selection', 'evaluation', 'tuning', 'final'.
+        If omitted, every section is printed in order.
+
+    Examples
+    --------
+    >>> from titanic_pipeline import print_pipeline_regression
+    >>> print_pipeline_regression()                # prints everything
+    >>> print_pipeline_regression('preprocessing') # prints Section 2 only
+    >>> print_pipeline_regression('tuning')        # prints Section 5 only
+    >>> print_pipeline_regression('final')         # prints prediction export
+    """
+    if section is not None:
+        section = section.lower().strip()
+        if section not in _SECTIONS_REG:
+            valid = ", ".join(f"'{k}'" for k in _SECTION_ORDER_REG)
+            raise ValueError(
+                f"Unknown section '{section}'. Valid options: {valid}"
+            )
+        _print_section_reg(section)
+        return
+
+    for key in _SECTION_ORDER_REG:
+        _print_section_reg(key)
+        print()
+
+
+def _print_section_reg(key: str) -> None:
+    sec = _SECTIONS_REG[key]
+    border = "#" + "=" * 72
+    print(border)
+    print(f" # {sec['title']}")
+    print(border)
+    print(sec["code"])
